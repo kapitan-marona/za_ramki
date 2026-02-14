@@ -47,7 +47,10 @@ function loadJob() {
     // Gentle merge to keep structure stable
     const job = defaultJob();
     job.header = { ...job.header, ...(parsed.header || {}) };
-    job.doors.entrance = { ...job.doors.entrance, ...((parsed.doors && parsed.doors.entrance) || {}) };
+    job.doors.entrance = {
+      ...job.doors.entrance,
+      ...((parsed.doors && parsed.doors.entrance) || {}),
+    };
     job.doors.interior = Array.isArray(parsed?.doors?.interior) ? parsed.doors.interior : [];
     job.doors.notes = (parsed?.doors?.notes ?? "");
     job.windows.items = Array.isArray(parsed?.windows?.items) ? parsed.windows.items : [];
@@ -320,7 +323,14 @@ function bindStaticInputs() {
     document.body.appendChild(a);
     a.click();
     a.remove();
+
     setTimeout(() => URL.revokeObjectURL(url), 500);
+
+    // ✅ очистка заполненных данных после скачивания PDF
+    state.job = defaultJob();   // новая пустая структура (дата будет today)
+    saveJob();                  // перезапишем localStorage
+    renderAll();                // обновим UI
+    setStatus("PDF скачан, форма очищена");
   });
 }
 
@@ -387,82 +397,58 @@ async function registerSW() {
   }
 }
 
-// ---------- PDF generator (minimal, template-based) ----------
+// ---------- PDF generator (template-based, ASCII-safe) ----------
 /*
-  We generate a simple A4 portrait PDF with a dedicated layout.
-  Font: PDF Base-14 Helvetica (does not require external CDN; available in PDF readers).
-  Rules:
-  - Always include header (even if empty -> still printed labels but only non-empty values are written)
-  - Print only non-empty values
-  - Exclude empty cards
-  - Exclude empty sections entirely
+  IMPORTANT:
+  Many PDF viewers on Windows are strict about encoding.
+  Base-14 fonts (Helvetica) reliably render ASCII, but Cyrillic breaks without embedding a font.
+  To keep it offline and dependency-free, we generate an ASCII-only PDF.
 */
 function generatePDF(job) {
-  // A4 in points: 595.28 x 841.89
+  // A4 portrait in points: 595.28 x 841.89
   const W = 595.28, H = 841.89;
   const margin = 48;
   const lineH = 14;
 
-  const parts = [];
-  const offsets = { xref: [] };
+  const enc = new TextEncoder();
+  function byteLen(s) { return enc.encode(s).length; }
 
-  function push(str) { parts.push(str); }
-  function obj(n, body) {
-    offsets.xref[n] = byteLength(parts.join(""));
-    push(`${n} 0 obj\n${body}\nendobj\n`);
-  }
-  function byteLength(str) {
-    // Count bytes in UTF-8
-    return new TextEncoder().encode(str).length;
-  }
-
-  // Escape for PDF string literal
-  function pdfStr(s) {
+  // ASCII-only PDF string literal
+  function pdfStrAscii(s) {
     const t = String(s ?? "")
+      .replace(/[^\x20-\x7E]/g, "") // drop non-ASCII (e.g. Cyrillic)
       .replace(/\\/g, "\\\\")
       .replace(/\(/g, "\\(")
       .replace(/\)/g, "\\)");
     return `(${t})`;
   }
 
-  // Text drawing (Helvetica)
-  function text(x, y, s, size = 11) {
-    // PDF origin bottom-left
-    const yy = H - y;
-    push(`BT /F1 ${size} Tf ${x.toFixed(2)} ${yy.toFixed(2)} Td ${pdfStr(s)} Tj ET\n`);
-  }
+  let content = "";
 
-  function labelValue(y, label, value) {
-    if (!isNonEmpty(value)) return y;
-    text(margin, y, `${label}:`, 10);
-    text(margin + 120, y, String(value), 11);
-    return y + lineH;
+  function text(x, y, s, size = 11) {
+    const yy = H - y;
+    content += `BT /F1 ${size} Tf ${x.toFixed(2)} ${yy.toFixed(2)} Td ${pdfStrAscii(s)} Tj ET\n`;
   }
 
   function sectionTitle(y, title) {
     text(margin, y, title, 14);
     y += 18;
-    // thin line (simple)
     const yy = H - (y - 6);
-    push(`0.8 w 0.85 0.89 0.95 RG ${margin} ${yy} m ${W - margin} ${yy} l S\n`);
+    content += `0.8 w 0.85 0.89 0.95 RG ${margin} ${yy} m ${W - margin} ${yy} l S\n`;
     y += 10;
     return y;
   }
 
-  // Collect content and apply exclusion rules
-  const headerLines = [];
-  if (isNonEmpty(job.header.date)) headerLines.push(["Дата", job.header.date]);
-  if (isNonEmpty(job.header.address)) headerLines.push(["Адрес", job.header.address]);
-  if (isNonEmpty(job.header.employeeSurname)) headerLines.push(["Сотрудник", job.header.employeeSurname]);
+  const header = job.header || {};
+  const entrance = job.doors?.entrance || {};
 
-  const entrance = job.doors.entrance || {};
   const entrancePrintable = {
     depth: sanitizeNumeric(entrance.depth),
     height: sanitizeNumeric(entrance.height),
     width: sanitizeNumeric(entrance.width),
   };
 
-  const interiorPrintable = (job.doors.interior || [])
+  const interiorPrintable = (job.doors?.interior || [])
     .map((d) => ({
       depth: sanitizeNumeric(d.depth),
       height: sanitizeNumeric(d.height),
@@ -470,7 +456,7 @@ function generatePDF(job) {
     }))
     .filter(cardNonEmpty);
 
-  const windowsPrintable = (job.windows.items || [])
+  const windowsPrintable = (job.windows?.items || [])
     .map((w) => ({
       depth: sanitizeNumeric(w.depth),
       height: sanitizeNumeric(w.height),
@@ -479,7 +465,7 @@ function generatePDF(job) {
     }))
     .filter(cardNonEmpty);
 
-  const radiatorsPrintable = (job.radiators.items || [])
+  const radiatorsPrintable = (job.radiators?.items || [])
     .map((r) => ({
       fromWall: sanitizeNumeric(r.fromWall),
       fromFloor: sanitizeNumeric(r.fromFloor),
@@ -487,170 +473,132 @@ function generatePDF(job) {
     }))
     .filter(cardNonEmpty);
 
-  const notesDoors = (job.doors.notes || "").trim();
-  const notesWindows = (job.windows.notes || "").trim();
-  const notesRadiators = (job.radiators.notes || "").trim();
+  const notesDoors = (job.doors?.notes || "").trim();
+  const notesWindows = (job.windows?.notes || "").trim();
+  const notesRadiators = (job.radiators?.notes || "").trim();
 
-  const doorsSectionHasData =
+  const doorsHasData =
     cardNonEmpty(entrancePrintable) ||
     interiorPrintable.length > 0 ||
     isNonEmpty(notesDoors);
 
-  const windowsSectionHasData =
+  const windowsHasData =
     windowsPrintable.length > 0 ||
     isNonEmpty(notesWindows);
 
-  const radiatorsSectionHasData =
+  const radiatorsHasData =
     radiatorsPrintable.length > 0 ||
     isNonEmpty(notesRadiators);
 
-  // ---- Start building PDF objects ----
-  push("%PDF-1.4\n");
-  // 1: Catalog, 2: Pages, 3: Page, 4: Content, 5: Font
+  // --- Content template ---
+  text(margin, 64, "Measurements Report", 18);
 
-  // Build content stream
-  const content = [];
-  const savedParts = parts;
-  parts.length = 0; // temporarily use parts as content builder
-
-  // Title
-  text(margin, 64, "Замеры — отчёт", 18);
-
-  // Header block (always included, but only non-empty values printed)
   let y = 96;
-  y = sectionTitle(y, "Шапка");
-  if (headerLines.length === 0) {
-    text(margin, y, "—", 11);
-    y += lineH;
-  } else {
-    for (const [lab, val] of headerLines) {
-      y = labelValue(y, lab, val);
-    }
-  }
+  y = sectionTitle(y, "Header");
 
-  // Doors
-  if (doorsSectionHasData) {
+  // Header always included; print only non-empty values, else dash
+  let printed = false;
+  if (isNonEmpty(header.date)) { text(margin, y, `Date: ${header.date}`, 11); y += lineH; printed = true; }
+  if (isNonEmpty(header.address)) { text(margin, y, `Address: ${header.address}`, 11); y += lineH; printed = true; }
+  if (isNonEmpty(header.employeeSurname)) { text(margin, y, `Employee: ${header.employeeSurname}`, 11); y += lineH; printed = true; }
+  if (!printed) { text(margin, y, "-", 11); y += lineH; }
+
+  if (doorsHasData) {
     y += 10;
-    y = sectionTitle(y, "Двери");
+    y = sectionTitle(y, "Doors");
 
-    // Entrance door
     if (cardNonEmpty(entrancePrintable)) {
-      text(margin, y, "Входная дверь", 12);
-      y += 16;
-
-      if (isNonEmpty(entrancePrintable.depth)) { text(margin + 18, y, `Глубина: ${entrancePrintable.depth} мм`, 11); y += lineH; }
-      if (isNonEmpty(entrancePrintable.height)) { text(margin + 18, y, `Высота: ${entrancePrintable.height} мм`, 11); y += lineH; }
-      if (isNonEmpty(entrancePrintable.width)) { text(margin + 18, y, `Ширина: ${entrancePrintable.width} мм`, 11); y += lineH; }
-
+      text(margin, y, "Entrance door", 12); y += 16;
+      if (isNonEmpty(entrancePrintable.depth)) { text(margin + 18, y, `Depth: ${entrancePrintable.depth} mm`, 11); y += lineH; }
+      if (isNonEmpty(entrancePrintable.height)) { text(margin + 18, y, `Height: ${entrancePrintable.height} mm`, 11); y += lineH; }
+      if (isNonEmpty(entrancePrintable.width)) { text(margin + 18, y, `Width: ${entrancePrintable.width} mm`, 11); y += lineH; }
       y += 6;
     }
 
-    // Interior doors
     if (interiorPrintable.length > 0) {
-      text(margin, y, "Межкомнатные двери", 12);
-      y += 16;
-
+      text(margin, y, "Interior doors", 12); y += 16;
       interiorPrintable.forEach((d, i) => {
-        text(margin + 18, y, `Дверь ${i + 1}`, 11);
-        y += lineH;
-
-        if (isNonEmpty(d.depth)) { text(margin + 36, y, `Глубина: ${d.depth} мм`, 11); y += lineH; }
-        if (isNonEmpty(d.height)) { text(margin + 36, y, `Высота: ${d.height} мм`, 11); y += lineH; }
-        if (isNonEmpty(d.width)) { text(margin + 36, y, `Ширина: ${d.width} мм`, 11); y += lineH; }
-
+        text(margin + 18, y, `Door ${i + 1}`, 11); y += lineH;
+        if (isNonEmpty(d.depth)) { text(margin + 36, y, `Depth: ${d.depth} mm`, 11); y += lineH; }
+        if (isNonEmpty(d.height)) { text(margin + 36, y, `Height: ${d.height} mm`, 11); y += lineH; }
+        if (isNonEmpty(d.width)) { text(margin + 36, y, `Width: ${d.width} mm`, 11); y += lineH; }
         y += 6;
       });
     }
 
     if (isNonEmpty(notesDoors)) {
-      text(margin, y, `Заметки: ${notesDoors}`, 11);
-      y += lineH;
+      text(margin, y, `Notes: ${notesDoors}`, 11); y += lineH;
     }
   }
 
-  // Windows
-  if (windowsSectionHasData) {
+  if (windowsHasData) {
     y += 10;
-    y = sectionTitle(y, "Окна");
+    y = sectionTitle(y, "Windows");
 
     windowsPrintable.forEach((w, i) => {
-      text(margin, y, `Окно ${i + 1}`, 12);
-      y += 16;
-
-      if (isNonEmpty(w.depth)) { text(margin + 18, y, `Глубина: ${w.depth} мм`, 11); y += lineH; }
-      if (isNonEmpty(w.height)) { text(margin + 18, y, `Высота: ${w.height} мм`, 11); y += lineH; }
-      if (isNonEmpty(w.width)) { text(margin + 18, y, `Ширина: ${w.width} мм`, 11); y += lineH; }
-      if (isNonEmpty(w.sill)) { text(margin + 18, y, `Подоконник: ${w.sill} мм`, 11); y += lineH; }
-
+      text(margin, y, `Window ${i + 1}`, 12); y += 16;
+      if (isNonEmpty(w.depth)) { text(margin + 18, y, `Depth: ${w.depth} mm`, 11); y += lineH; }
+      if (isNonEmpty(w.height)) { text(margin + 18, y, `Height: ${w.height} mm`, 11); y += lineH; }
+      if (isNonEmpty(w.width)) { text(margin + 18, y, `Width: ${w.width} mm`, 11); y += lineH; }
+      if (isNonEmpty(w.sill)) { text(margin + 18, y, `Sill: ${w.sill} mm`, 11); y += lineH; }
       y += 6;
     });
 
     if (isNonEmpty(notesWindows)) {
-      text(margin, y, `Заметки: ${notesWindows}`, 11);
-      y += lineH;
+      text(margin, y, `Notes: ${notesWindows}`, 11); y += lineH;
     }
   }
 
-  // Radiators
-  if (radiatorsSectionHasData) {
+  if (radiatorsHasData) {
     y += 10;
-    y = sectionTitle(y, "Радиаторы");
+    y = sectionTitle(y, "Radiators");
 
     radiatorsPrintable.forEach((r, i) => {
-      text(margin, y, `Радиатор ${i + 1}`, 12);
-      y += 16;
-
-      if (isNonEmpty(r.fromWall)) { text(margin + 18, y, `От стены: ${r.fromWall} мм`, 11); y += lineH; }
-      if (isNonEmpty(r.fromFloor)) { text(margin + 18, y, `От пола: ${r.fromFloor} мм`, 11); y += lineH; }
-      if (isNonEmpty(r.centerDistance)) { text(margin + 18, y, `Межосевое: ${r.centerDistance} мм`, 11); y += lineH; }
-
+      text(margin, y, `Radiator ${i + 1}`, 12); y += 16;
+      if (isNonEmpty(r.fromWall)) { text(margin + 18, y, `From wall: ${r.fromWall} mm`, 11); y += lineH; }
+      if (isNonEmpty(r.fromFloor)) { text(margin + 18, y, `From floor: ${r.fromFloor} mm`, 11); y += lineH; }
+      if (isNonEmpty(r.centerDistance)) { text(margin + 18, y, `Center distance: ${r.centerDistance} mm`, 11); y += lineH; }
       y += 6;
     });
 
     if (isNonEmpty(notesRadiators)) {
-      text(margin, y, `Заметки: ${notesRadiators}`, 11);
-      y += lineH;
+      text(margin, y, `Notes: ${notesRadiators}`, 11); y += lineH;
     }
   }
 
-  // Footer note
-  y = Math.min(y + 18, H - 60);
-  text(margin, H - 40, "Сгенерировано офлайн. Печать включает только заполненные данные.", 9);
+  text(margin, H - 40, "Generated offline. Only filled fields are printed.", 9);
 
-  const contentStream = parts.join("");
-  parts.length = 0;
-  parts.push(...savedParts);
+  // --- Build PDF objects ---
+  let out = "%PDF-1.4\n";
+  const xref = [];
+  function addObj(n, body) {
+    xref[n] = byteLen(out);
+    out += `${n} 0 obj\n${body}\nendobj\n`;
+  }
 
-  // Now write objects
-  obj(1, `<< /Type /Catalog /Pages 2 0 R >>`);
-  obj(2, `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`);
-  obj(5, `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`);
-
-  // Content object (4)
-  obj(4, `<< /Length ${byteLength(contentStream)} >>\nstream\n${contentStream}endstream`);
-
-  // Page object (3)
-  obj(3,
+  // 1 Catalog, 2 Pages, 3 Page, 4 Contents, 5 Font
+  addObj(1, `<< /Type /Catalog /Pages 2 0 R >>`);
+  addObj(2, `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`);
+  addObj(5, `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`);
+  addObj(4, `<< /Length ${byteLen(content)} >>\nstream\n${content}endstream`);
+  addObj(3,
     `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W.toFixed(2)} ${H.toFixed(2)}]
        /Resources << /Font << /F1 5 0 R >> >>
        /Contents 4 0 R
     >>`.replace(/\s+/g, " ")
   );
 
-  // Xref
-  const xrefStart = byteLength(parts.join(""));
-  push("xref\n");
-  push("0 6\n");
-  push("0000000000 65535 f \n");
+  const startxref = byteLen(out);
+  out += "xref\n";
+  out += "0 6\n";
+  out += "0000000000 65535 f \n";
   for (let i = 1; i <= 5; i++) {
-    const off = offsets.xref[i] || 0;
-    push(String(off).padStart(10, "0") + " 00000 n \n");
+    const off = xref[i] || 0;
+    out += String(off).padStart(10, "0") + " 00000 n \n";
   }
+  out += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF\n`;
 
-  // Trailer
-  push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`);
-
-  return new TextEncoder().encode(parts.join(""));
+  return enc.encode(out);
 }
 
 // ---------- Init ----------
