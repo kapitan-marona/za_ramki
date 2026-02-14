@@ -1,0 +1,17 @@
+{
+  "name": "Замеры — чек-лист",
+  "short_name": "Замеры",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#0b5fff",
+  "description": "Офлайн PWA чек-лист замеров (двери, окна, радиаторы) с выгрузкой в PDF.",
+  "icons": [
+    {
+      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABuUlEQVR4nO2aS0rDQBCEv4o0kA7gB5yQG3QG0mQb7kCwQ1rH0Jt2w0nqQk0vQm4y7X8Yk1m9sWgWwKQ0Yy8m9u2sYcQAAAAAAAAAAAAAAAOyqVQq8p8m4b9n0uYV6lYzQm4mQbWbq4r7u2m8QbYwYQG8vGmQJgJmWn7o9bQf2c+vGm2mYd6o8xgV4cZ2tQn0c9w2yQn4n0Gqv2i3Qk7bJ8o8wH5c3m0u0pY0b8sJpQ9cU7mQb8o3tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c6Qn8d2cX9b0mQb9o7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7tZrGkzQf2c7n8B8v+o0QkQm0AAAAASUVORK5CYII=",
+      "sizes": "64x64",
+      "type": "image/png"
+    }
+  ]
+}

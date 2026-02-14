@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b5fff" />
+  <title>Замеры — чек-лист</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand__title">Замеры</div>
+      <div class="brand__subtitle">офлайн чек-лист</div>
+    </div>
+    <div class="status" id="statusText" aria-live="polite"></div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2 class="card__title">Шапка</h2>
+      <div class="grid grid--3">
+        <label class="field">
+          <span class="field__label">Дата</span>
+          <input id="date" type="date" />
+        </label>
+
+        <label class="field">
+          <span class="field__label">Адрес</span>
+          <input id="address" type="text" placeholder="Напр. ул. Примерная, 10" />
+        </label>
+
+        <label class="field">
+          <span class="field__label">Фамилия сотрудника</span>
+          <input id="employeeSurname" type="text" placeholder="Иванов" />
+        </label>
+      </div>
+    </section>
+
+    <section class="card" id="doorsSection">
+      <div class="card__head">
+        <h2 class="card__title">Двери</h2>
+      </div>
+
+      <div class="subcard">
+        <h3 class="subcard__title">Входная дверь</h3>
+        <div class="grid grid--3">
+          <label class="field">
+            <span class="field__label">Глубина (мм)</span>
+            <input data-bind="doors.entrance.depth" class="num" inputmode="numeric" pattern="[0-9]*" placeholder="мм" />
+          </label>
+          <label class="field">
+            <span class="field__label">Высота (мм)</span>
+            <input data-bind="doors.entrance.height" class="num" inputmode="numeric" pattern="[0-9]*" placeholder="мм" />
+          </label>
+          <label class="field">
+            <span class="field__label">Ширина (мм)</span>
+            <input data-bind="doors.entrance.width" class="num" inputmode="numeric" pattern="[0-9]*" placeholder="мм" />
+          </label>
+        </div>
+      </div>
+
+      <div class="subcard">
+        <div class="subcard__head">
+          <h3 class="subcard__title">Межкомнатные двери</h3>
+          <button class="btn btn--ghost" id="addInteriorDoor" type="button">+ Добавить</button>
+        </div>
+        <div id="interiorDoorsList" class="list"></div>
+      </div>
+
+      <label class="field">
+        <span class="field__label">Заметки по дверям</span>
+        <input id="notesDoors" type="text" placeholder="Короткий комментарий" />
+      </label>
+    </section>
+
+    <section class="card" id="windowsSection">
+      <div class="card__head">
+        <h2 class="card__title">Окна</h2>
+        <button class="btn btn--ghost" id="addWindow" type="button">+ Добавить</button>
+      </div>
+
+      <div id="windowsList" class="list"></div>
+
+      <label class="field">
+        <span class="field__label">Заметки по окнам</span>
+        <input id="notesWindows" type="text" placeholder="Короткий комментарий" />
+      </label>
+    </section>
+
+    <section class="card" id="radiatorsSection">
+      <div class="card__head">
+        <h2 class="card__title">Радиаторы</h2>
+        <button class="btn btn--ghost" id="addRadiator" type="button">+ Добавить</button>
+      </div>
+
+      <div id="radiatorsList" class="list"></div>
+
+      <label class="field">
+        <span class="field__label">Заметки по радиаторам</span>
+        <input id="notesRadiators" type="text" placeholder="Короткий комментарий" />
+      </label>
+    </section>
+
+    <section class="actions">
+      <button class="btn btn--primary" id="downloadPdf" type="button">Скачать PDF</button>
+      <button class="btn btn--danger" id="resetAll" type="button" title="Очистить локальные данные">Сбросить</button>
+    </section>
+
+    <footer class="footer">
+      <div>Работает офлайн. Данные хранятся только на устройстве.</div>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
