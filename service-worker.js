@@ -1,9 +1,10 @@
-const CACHE_NAME = "measurements-pwa-v2";
+const CACHE_NAME = "measurements-pwa-v3";
 
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
+  "./pdf-lib.min.js",
   "./app.js",
   "./manifest.json",
   "./service-worker.js"

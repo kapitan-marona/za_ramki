@@ -214,38 +214,177 @@ function downloadPdfBlob(blob, filename) {
 }
 
 // ---------- Simple ASCII-safe PDF ----------
-function generatePDF(job) {
-  const content = `%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>
-endobj
-xref
-0 4
-0000000000 65535 f 
-trailer
-<< /Size 4 /Root 1 0 R >>
-startxref
-0
-%%EOF`;
+async function generatePDF(job) {
+  const { PDFDocument, StandardFonts } = window.PDFLib;
 
-  return new TextEncoder().encode(content);
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595.28, 841.89]); // A4 portrait
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  const margin = 48;
+  let y = 841.89 - 64;
+  const lineGap = 6;
+
+  function draw(text, size = 11, indent = 0) {
+    page.drawText(String(text), { x: margin + indent, y, size, font });
+    y -= (size + lineGap);
+  }
+
+  function section(title) {
+    y -= 6;
+    page.drawText(String(title), { x: margin, y, size: 14, font });
+    y -= 20;
+  }
+
+  function isNonEmpty(v) {
+    return v !== null && v !== undefined && String(v).trim() !== "";
+  }
+
+  function sanitizeNumeric(raw) {
+    return String(raw || "").replace(/[^\d]/g, "");
+  }
+
+  function cardNonEmpty(obj) {
+    return Object.values(obj).some((v) => isNonEmpty(v));
+  }
+
+  draw("Measurements Report", 18);
+  y -= 8;
+
+  section("Header");
+  let headerPrinted = false;
+  if (isNonEmpty(job?.header?.date)) { draw(`Date: ${job.header.date}`); headerPrinted = true; }
+  if (isNonEmpty(job?.header?.address)) { draw(`Address: ${job.header.address}`); headerPrinted = true; }
+  if (isNonEmpty(job?.header?.employeeSurname)) { draw(`Employee: ${job.header.employeeSurname}`); headerPrinted = true; }
+  if (!headerPrinted) draw("-");
+
+  // Doors
+  const entrance = job?.doors?.entrance || {};
+  const entrancePrintable = {
+    depth: sanitizeNumeric(entrance.depth),
+    height: sanitizeNumeric(entrance.height),
+    width: sanitizeNumeric(entrance.width),
+  };
+
+  const interiorPrintable = (job?.doors?.interior || [])
+    .map((d) => ({
+      depth: sanitizeNumeric(d.depth),
+      height: sanitizeNumeric(d.height),
+      width: sanitizeNumeric(d.width),
+    }))
+    .filter(cardNonEmpty);
+
+  const notesDoors = (job?.doors?.notes || "").trim();
+  const doorsHasData = cardNonEmpty(entrancePrintable) || interiorPrintable.length > 0 || isNonEmpty(notesDoors);
+
+  if (doorsHasData) {
+    section("Doors");
+
+    if (cardNonEmpty(entrancePrintable)) {
+      draw("Entrance door", 12);
+      if (isNonEmpty(entrancePrintable.depth)) draw(`Depth: ${entrancePrintable.depth} mm`, 11, 18);
+      if (isNonEmpty(entrancePrintable.height)) draw(`Height: ${entrancePrintable.height} mm`, 11, 18);
+      if (isNonEmpty(entrancePrintable.width)) draw(`Width: ${entrancePrintable.width} mm`, 11, 18);
+      y -= 6;
+    }
+
+    if (interiorPrintable.length > 0) {
+      draw("Interior doors", 12);
+      interiorPrintable.forEach((d, i) => {
+        draw(`Door ${i + 1}`, 11, 18);
+        if (isNonEmpty(d.depth)) draw(`Depth: ${d.depth} mm`, 11, 36);
+        if (isNonEmpty(d.height)) draw(`Height: ${d.height} mm`, 11, 36);
+        if (isNonEmpty(d.width)) draw(`Width: ${d.width} mm`, 11, 36);
+        y -= 6;
+      });
+    }
+
+    if (isNonEmpty(notesDoors)) draw(`Notes: ${notesDoors}`);
+  }
+
+  // Windows
+  const windowsPrintable = (job?.windows?.items || [])
+    .map((w) => ({
+      depth: sanitizeNumeric(w.depth),
+      height: sanitizeNumeric(w.height),
+      width: sanitizeNumeric(w.width),
+      sill: sanitizeNumeric(w.sill),
+    }))
+    .filter(cardNonEmpty);
+
+  const notesWindows = (job?.windows?.notes || "").trim();
+  const windowsHasData = windowsPrintable.length > 0 || isNonEmpty(notesWindows);
+
+  if (windowsHasData) {
+    section("Windows");
+
+    windowsPrintable.forEach((w, i) => {
+      draw(`Window ${i + 1}`, 12);
+      if (isNonEmpty(w.depth)) draw(`Depth: ${w.depth} mm`, 11, 18);
+      if (isNonEmpty(w.height)) draw(`Height: ${w.height} mm`, 11, 18);
+      if (isNonEmpty(w.width)) draw(`Width: ${w.width} mm`, 11, 18);
+      if (isNonEmpty(w.sill)) draw(`Sill: ${w.sill} mm`, 11, 18);
+      y -= 6;
+    });
+
+    if (isNonEmpty(notesWindows)) draw(`Notes: ${notesWindows}`);
+  }
+
+  // Radiators
+  const radiatorsPrintable = (job?.radiators?.items || [])
+    .map((r) => ({
+      fromWall: sanitizeNumeric(r.fromWall),
+      fromFloor: sanitizeNumeric(r.fromFloor),
+      centerDistance: sanitizeNumeric(r.centerDistance),
+    }))
+    .filter(cardNonEmpty);
+
+  const notesRadiators = (job?.radiators?.notes || "").trim();
+  const radiatorsHasData = radiatorsPrintable.length > 0 || isNonEmpty(notesRadiators);
+
+  if (radiatorsHasData) {
+    section("Radiators");
+
+    radiatorsPrintable.forEach((r, i) => {
+      draw(`Radiator ${i + 1}`, 12);
+      if (isNonEmpty(r.fromWall)) draw(`From wall: ${r.fromWall} mm`, 11, 18);
+      if (isNonEmpty(r.fromFloor)) draw(`From floor: ${r.fromFloor} mm`, 11, 18);
+      if (isNonEmpty(r.centerDistance)) draw(`Center distance: ${r.centerDistance} mm`, 11, 18);
+      y -= 6;
+    });
+
+    if (isNonEmpty(notesRadiators)) draw(`Notes: ${notesRadiators}`);
+  }
+
+  page.drawText("Generated offline. Only filled fields are printed.", {
+    x: margin,
+    y: 28,
+    size: 9,
+    font,
+  });
+
+  return await pdfDoc.save();
 }
 
 // ---------- Init ----------
 function init() {
   renderAll();
 
-  $("#downloadPdf").addEventListener("click", () => {
-    const pdfBytes = generatePDF(state.job);
+  $("#downloadPdf").addEventListener("click", async () => {
+  try {
+    const pdfBytes = await generatePDF(state.job);
     const blob = new Blob([pdfBytes], { type: "application/pdf" });
 
     const safeDate = (state.job.header.date || todayISO()).replaceAll("-", "");
+    const safeSurname = (state.job.header.employeeSurname || "employee").trim() || "employee";
+    const filename = `zamery_${safeDate}_${safeSurname}.pdf`;
+
+    downloadPdfBlob(blob, filename);
+  } catch (e) {
+    console.error(e);
+    alert("PDF error. Open console for details.");
+  }
+});const safeDate = (state.job.header.date || todayISO()).replaceAll("-", "");
     const safeSurname = (state.job.header.employeeSurname || "employee").trim() || "employee";
     const filename = `zamery_${safeDate}_${safeSurname}.pdf`;
 
