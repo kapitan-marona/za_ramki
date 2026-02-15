@@ -52,6 +52,7 @@ function loadJob() {
       ...job.doors.entrance,
       ...((parsed.doors && parsed.doors.entrance) || {}),
     };
+
     job.doors.interior = Array.isArray(parsed?.doors?.interior) ? parsed.doors.interior : [];
     job.doors.notes = parsed?.doors?.notes ?? "";
 
@@ -116,14 +117,15 @@ function setByPath(obj, path, value) {
   cur[parts[parts.length - 1]] = value;
 }
 
+// NEW: name field (backward compatible)
 function buildInteriorDoor() {
-  return { depth: "", height: "", width: "" };
+  return { name: "", depth: "", height: "", width: "" };
 }
 function buildWindow() {
-  return { depth: "", height: "", width: "", sill: "" };
+  return { name: "", depth: "", height: "", width: "", sill: "" };
 }
 function buildRadiator() {
-  return { fromWall: "", fromFloor: "", centerDistance: "" };
+  return { name: "", fromWall: "", fromFloor: "", centerDistance: "" };
 }
 
 // ---------- Rendering ----------
@@ -150,7 +152,15 @@ function renderInteriorDoors() {
 
     wrap.innerHTML = `
       <div class="item__head">
-        <div class="item__title">Межкомнатная дверь ${idx + 1}</div>
+        <div class="item__title">
+          <input
+            class="name"
+            type="text"
+            data-path="doors.interior.${idx}.name"
+            placeholder="Межкомнатная дверь ${idx + 1}"
+            value="${door.name ?? ""}"
+          />
+        </div>
         <button class="btn btn--danger" type="button" data-action="remove-interior" data-index="${idx}">Удалить</button>
       </div>
       <div class="grid grid--3">
@@ -181,7 +191,15 @@ function renderWindows() {
     wrap.className = "item";
     wrap.innerHTML = `
       <div class="item__head">
-        <div class="item__title">Окно ${idx + 1}</div>
+        <div class="item__title">
+          <input
+            class="name"
+            type="text"
+            data-path="windows.items.${idx}.name"
+            placeholder="Окно ${idx + 1}"
+            value="${w.name ?? ""}"
+          />
+        </div>
         <button class="btn btn--danger" type="button" data-action="remove-window" data-index="${idx}">Удалить</button>
       </div>
       <div class="grid grid--3">
@@ -219,7 +237,15 @@ function renderRadiators() {
     wrap.className = "item";
     wrap.innerHTML = `
       <div class="item__head">
-        <div class="item__title">Радиатор ${idx + 1}</div>
+        <div class="item__title">
+          <input
+            class="name"
+            type="text"
+            data-path="radiators.items.${idx}.name"
+            placeholder="Радиатор ${idx + 1}"
+            value="${r.name ?? ""}"
+          />
+        </div>
         <button class="btn btn--danger" type="button" data-action="remove-radiator" data-index="${idx}">Удалить</button>
       </div>
       <div class="grid grid--3">
@@ -294,31 +320,58 @@ async function generatePDF(job) {
     if (!r.ok) throw new Error("Roboto-Regular.ttf not found");
     return r.arrayBuffer();
   });
-  const manascoBytes = await fetch("./Manasco.otf").then((r) => {
-    if (!r.ok) throw new Error("Manasco.otf not found");
+
+  const titleBytes = await fetch("./EducationalGothic-Regular.otf").then((r) => {
+    if (!r.ok) throw new Error("EducationalGothic-Regular.otf not found");
+    return r.arrayBuffer();
+  });
+
+  const logoBytes = await fetch("./logo.png").then((r) => {
+    if (!r.ok) throw new Error("logo.png not found");
     return r.arrayBuffer();
   });
 
   const fontText = await pdfDoc.embedFont(robotoBytes, { subset: true });
-  const fontTitle = await pdfDoc.embedFont(manascoBytes, { subset: true });
+  const fontTitle = await pdfDoc.embedFont(titleBytes, { subset: true });
+  const logoImg = await pdfDoc.embedPng(logoBytes);
 
-  const page = pdfDoc.addPage([595.28, 841.89]); // A4 portrait
+  // A4 portrait constants
   const W = 595.28;
   const H = 841.89;
 
+  // Brand colors
+  const BG = window.PDFLib.rgb(31 / 255, 30 / 255, 26 / 255); // #1F1E1A
+  const colorText = window.PDFLib.rgb(0.95, 0.95, 0.93);
+  const colorMuted = window.PDFLib.rgb(0.78, 0.78, 0.74);
+  const colorRule = window.PDFLib.rgb(0.30, 0.30, 0.28);
+  const colorCard = window.PDFLib.rgb(0.12, 0.12, 0.11);
+
   const marginX = 48;
-  let y = H - 70;
-
+  const marginBottom = 54;
   const gap = 6;
-
-  const colorText = window.PDFLib.rgb(0.12, 0.14, 0.18);
-  const colorMuted = window.PDFLib.rgb(0.45, 0.48, 0.55);
-  const colorRule = window.PDFLib.rgb(0.85, 0.87, 0.91);
 
   const SIZE_TITLE = 24;
   const SIZE_H2 = 13.5;
   const SIZE_TEXT = 11;
   const SIZE_SMALL = 9;
+
+  let page = null;
+  let y = 0;
+
+  function newPage() {
+    page = pdfDoc.addPage([W, H]);
+
+    // background
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: W,
+      height: H,
+      color: BG,
+    });
+
+    y = H - 70;
+  }
 
   function draw(text, opts = {}) {
     const {
@@ -344,13 +397,20 @@ async function generatePDF(job) {
     y -= 14;
   }
 
+  function ensureSpace(minHeight) {
+    if (y - minHeight < marginBottom) {
+      newPage();
+    }
+  }
+
   function section(title) {
+    ensureSpace(42);
     y -= 8;
     draw(title, { font: fontTitle, size: SIZE_H2 });
     rule();
   }
 
-  function isNonEmpty(v) {
+  function isNonEmptyLocal(v) {
     return v !== null && v !== undefined && String(v).trim() !== "";
   }
 
@@ -358,8 +418,58 @@ async function generatePDF(job) {
     return String(raw || "").replace(/[^\d]/g, "");
   }
 
-  function cardNonEmpty(obj) {
-    return Object.values(obj).some((v) => isNonEmpty(v));
+  function cardNonEmptyLocal(obj) {
+    return Object.values(obj).some((v) => isNonEmptyLocal(v));
+  }
+
+  function card(title, rows) {
+    const padding = 12;
+    const rowH = 16;
+    const headerH = 20;
+
+    const safeRows = Array.isArray(rows) ? rows.filter((r) => isNonEmptyLocal(r)) : [];
+    const h = padding + headerH + safeRows.length * rowH + padding;
+
+    ensureSpace(h + 10);
+
+    const x = marginX;
+    const w = W - marginX * 2;
+    const yTop = y;
+
+    // card rect
+    page.drawRectangle({
+      x,
+      y: yTop - h,
+      width: w,
+      height: h,
+      color: colorCard,
+      borderColor: colorRule,
+      borderWidth: 1,
+    });
+
+    // title
+    page.drawText(String(title), {
+      x: x + padding,
+      y: yTop - padding - 14,
+      size: 12.5,
+      font: fontTitle,
+      color: colorText,
+    });
+
+    // rows
+    let yy = yTop - padding - headerH;
+    safeRows.forEach((row) => {
+      page.drawText(String(row), {
+        x: x + padding,
+        y: yy - 12,
+        size: SIZE_TEXT,
+        font: fontText,
+        color: colorMuted,
+      });
+      yy -= rowH;
+    });
+
+    y = yTop - h - 12;
   }
 
   // ---------- Collect printable data ----------
@@ -372,62 +482,94 @@ async function generatePDF(job) {
   const entranceP = { depth: N(entrance.depth), height: N(entrance.height), width: N(entrance.width) };
 
   const interiorP = (doors?.interior || [])
-    .map((d) => ({ depth: N(d.depth), height: N(d.height), width: N(d.width) }))
-    .filter(cardNonEmpty);
+    .map((d) => ({
+      name: String(d?.name || "").trim(),
+      depth: N(d?.depth),
+      height: N(d?.height),
+      width: N(d?.width),
+    }))
+    .filter(cardNonEmptyLocal);
 
   const windowsP = (windows?.items || [])
-    .map((w) => ({ depth: N(w.depth), height: N(w.height), width: N(w.width), sill: N(w.sill) }))
-    .filter(cardNonEmpty);
+    .map((w) => ({
+      name: String(w?.name || "").trim(),
+      depth: N(w?.depth),
+      height: N(w?.height),
+      width: N(w?.width),
+      sill: N(w?.sill),
+    }))
+    .filter(cardNonEmptyLocal);
 
   const radiatorsP = (radiators?.items || [])
-    .map((r) => ({ fromWall: N(r.fromWall), fromFloor: N(r.fromFloor), centerDistance: N(r.centerDistance) }))
-    .filter(cardNonEmpty);
+    .map((r) => ({
+      name: String(r?.name || "").trim(),
+      fromWall: N(r?.fromWall),
+      fromFloor: N(r?.fromFloor),
+      centerDistance: N(r?.centerDistance),
+    }))
+    .filter(cardNonEmptyLocal);
 
   const notesDoors = String(doors?.notes || "").trim();
   const notesWindows = String(windows?.notes || "").trim();
   const notesRadiators = String(radiators?.notes || "").trim();
 
-  const doorsHas = cardNonEmpty(entranceP) || interiorP.length > 0 || isNonEmpty(notesDoors);
-  const windowsHas = windowsP.length > 0 || isNonEmpty(notesWindows);
-  const radiatorsHas = radiatorsP.length > 0 || isNonEmpty(notesRadiators);
+  const doorsHas = cardNonEmptyLocal(entranceP) || interiorP.length > 0 || isNonEmptyLocal(notesDoors);
+  const windowsHas = windowsP.length > 0 || isNonEmptyLocal(notesWindows);
+  const radiatorsHas = radiatorsP.length > 0 || isNonEmptyLocal(notesRadiators);
 
   // ---------- Draw PDF ----------
-  draw("Замеры", { font: fontTitle, size: SIZE_TITLE });
-  draw("Отчёт по объекту", { font: fontText, size: SIZE_TEXT, color: colorMuted });
-  y -= 6;
+  newPage();
 
-  section("Шапка");
-  let printed = false;
-  if (isNonEmpty(header.date)) { draw(`Дата: ${header.date}`); printed = true; }
-  if (isNonEmpty(header.address)) { draw(`Адрес: ${header.address}`); printed = true; }
-  if (isNonEmpty(header.employeeSurname)) { draw(`Сотрудник: ${header.employeeSurname}`); printed = true; }
-  if (!printed) draw("—", { color: colorMuted });
+  // Logo in header
+  const logoW = 44;
+  const logoH = (logoImg.height / logoImg.width) * logoW;
+
+  page.drawImage(logoImg, {
+    x: marginX,
+    y: H - 54 - logoH / 2,
+    width: logoW,
+    height: logoH,
+  });
+
+  draw("Замеры", { font: fontTitle, size: SIZE_TITLE, x: marginX + 56 });
+  draw("Отчёт по объекту", { font: fontText, size: SIZE_TEXT, color: colorMuted, x: marginX + 56 });
+  y -= 10;
+
+  // Header block (no "Шапка")
+  rule();
+
+  const headerRows = [];
+  if (isNonEmptyLocal(header.date)) headerRows.push(`Дата: ${header.date}`);
+  if (isNonEmptyLocal(header.address)) headerRows.push(`Адрес: ${header.address}`);
+  if (isNonEmptyLocal(header.employeeSurname)) headerRows.push(`Сотрудник: ${header.employeeSurname}`);
+  if (headerRows.length === 0) headerRows.push("—");
+
+  card("Данные объекта", headerRows);
 
   if (doorsHas) {
     section("Двери");
 
-    if (cardNonEmpty(entranceP)) {
-      draw("Входная дверь", { font: fontTitle, size: 12.5 });
-      if (isNonEmpty(entranceP.depth)) draw(`Глубина: ${entranceP.depth} мм`, { x: marginX + 14 });
-      if (isNonEmpty(entranceP.height)) draw(`Высота: ${entranceP.height} мм`, { x: marginX + 14 });
-      if (isNonEmpty(entranceP.width)) draw(`Ширина: ${entranceP.width} мм`, { x: marginX + 14 });
-      y -= 4;
+    if (cardNonEmptyLocal(entranceP)) {
+      const rows = [];
+      if (isNonEmptyLocal(entranceP.depth)) rows.push(`Глубина: ${entranceP.depth} мм`);
+      if (isNonEmptyLocal(entranceP.height)) rows.push(`Высота: ${entranceP.height} мм`);
+      if (isNonEmptyLocal(entranceP.width)) rows.push(`Ширина: ${entranceP.width} мм`);
+      card("Входная дверь", rows);
     }
 
     if (interiorP.length > 0) {
-      draw("Межкомнатные двери", { font: fontTitle, size: 12.5 });
       interiorP.forEach((d, i) => {
-        draw(`Дверь ${i + 1}`, { x: marginX + 14, color: colorMuted });
-        if (isNonEmpty(d.depth)) draw(`Глубина: ${d.depth} мм`, { x: marginX + 28 });
-        if (isNonEmpty(d.height)) draw(`Высота: ${d.height} мм`, { x: marginX + 28 });
-        if (isNonEmpty(d.width)) draw(`Ширина: ${d.width} мм`, { x: marginX + 28 });
-        y -= 4;
+        const rows = [];
+        if (isNonEmptyLocal(d.depth)) rows.push(`Глубина: ${d.depth} мм`);
+        if (isNonEmptyLocal(d.height)) rows.push(`Высота: ${d.height} мм`);
+        if (isNonEmptyLocal(d.width)) rows.push(`Ширина: ${d.width} мм`);
+        const title = d.name || `Межкомнатная дверь ${i + 1}`;
+        card(title, rows);
       });
     }
 
-    if (isNonEmpty(notesDoors)) {
-      draw("Заметки:", { font: fontTitle, size: 12.5 });
-      draw(notesDoors, { x: marginX + 14 });
+    if (isNonEmptyLocal(notesDoors)) {
+      card("Заметки по дверям", [notesDoors]);
     }
   }
 
@@ -435,17 +577,17 @@ async function generatePDF(job) {
     section("Окна");
 
     windowsP.forEach((w, i) => {
-      draw(`Окно ${i + 1}`, { font: fontTitle, size: 12.5 });
-      if (isNonEmpty(w.depth)) draw(`Глубина: ${w.depth} мм`, { x: marginX + 14 });
-      if (isNonEmpty(w.height)) draw(`Высота: ${w.height} мм`, { x: marginX + 14 });
-      if (isNonEmpty(w.width)) draw(`Ширина: ${w.width} мм`, { x: marginX + 14 });
-      if (isNonEmpty(w.sill)) draw(`Подоконник: ${w.sill} мм`, { x: marginX + 14 });
-      y -= 4;
+      const rows = [];
+      if (isNonEmptyLocal(w.depth)) rows.push(`Глубина: ${w.depth} мм`);
+      if (isNonEmptyLocal(w.height)) rows.push(`Высота: ${w.height} мм`);
+      if (isNonEmptyLocal(w.width)) rows.push(`Ширина: ${w.width} мм`);
+      if (isNonEmptyLocal(w.sill)) rows.push(`Подоконник: ${w.sill} мм`);
+      const title = w.name || `Окно ${i + 1}`;
+      card(title, rows);
     });
 
-    if (isNonEmpty(notesWindows)) {
-      draw("Заметки:", { font: fontTitle, size: 12.5 });
-      draw(notesWindows, { x: marginX + 14 });
+    if (isNonEmptyLocal(notesWindows)) {
+      card("Заметки по окнам", [notesWindows]);
     }
   }
 
@@ -453,20 +595,20 @@ async function generatePDF(job) {
     section("Радиаторы");
 
     radiatorsP.forEach((r, i) => {
-      draw(`Радиатор ${i + 1}`, { font: fontTitle, size: 12.5 });
-      if (isNonEmpty(r.fromWall)) draw(`От стены: ${r.fromWall} мм`, { x: marginX + 14 });
-      if (isNonEmpty(r.fromFloor)) draw(`От пола: ${r.fromFloor} мм`, { x: marginX + 14 });
-      if (isNonEmpty(r.centerDistance)) draw(`Межосевое: ${r.centerDistance} мм`, { x: marginX + 14 });
-      y -= 4;
+      const rows = [];
+      if (isNonEmptyLocal(r.fromWall)) rows.push(`От стены: ${r.fromWall} мм`);
+      if (isNonEmptyLocal(r.fromFloor)) rows.push(`От пола: ${r.fromFloor} мм`);
+      if (isNonEmptyLocal(r.centerDistance)) rows.push(`Межосевое: ${r.centerDistance} мм`);
+      const title = r.name || `Радиатор ${i + 1}`;
+      card(title, rows);
     });
 
-    if (isNonEmpty(notesRadiators)) {
-      draw("Заметки:", { font: fontTitle, size: 12.5 });
-      draw(notesRadiators, { x: marginX + 14 });
+    if (isNonEmptyLocal(notesRadiators)) {
+      card("Заметки по радиаторам", [notesRadiators]);
     }
   }
 
-  // footer
+  // footer (always on last page of current flow; if you want on every page позже сделаем)
   page.drawText("Сгенерировано офлайн. В отчёт попадают только заполненные поля.", {
     x: marginX,
     y: 26,
@@ -478,17 +620,18 @@ async function generatePDF(job) {
   return await pdfDoc.save();
 }
 
-
 // ---------- Events ----------
 function bindStaticInputs() {
   $("#date").addEventListener("input", (e) => {
     state.job.header.date = e.target.value || todayISO();
     saveJob();
   });
+
   $("#address").addEventListener("input", (e) => {
     state.job.header.address = e.target.value;
     saveJob();
   });
+
   $("#employeeSurname").addEventListener("input", (e) => {
     state.job.header.employeeSurname = e.target.value;
     saveJob();
@@ -498,10 +641,12 @@ function bindStaticInputs() {
     state.job.doors.notes = e.target.value;
     saveJob();
   });
+
   $("#notesWindows").addEventListener("input", (e) => {
     state.job.windows.notes = e.target.value;
     saveJob();
   });
+
   $("#notesRadiators").addEventListener("input", (e) => {
     state.job.radiators.notes = e.target.value;
     saveJob();
@@ -533,21 +678,20 @@ function bindStaticInputs() {
   });
 
   $("#downloadPdf").addEventListener("click", async () => {
-  try {
-    const pdfBytes = await generatePDF(state.job);
-    const blob = new Blob([pdfBytes], { type: "application/pdf" });
+    try {
+      const pdfBytes = await generatePDF(state.job);
+      const blob = new Blob([pdfBytes], { type: "application/pdf" });
 
-    const safeDate = (state.job.header.date || todayISO()).replaceAll("-", "");
-    const safeSurname = (state.job.header.employeeSurname || "employee").trim() || "employee";
-    const filename = `zamery_${safeDate}_${safeSurname}.pdf`;
+      const safeDate = (state.job.header.date || todayISO()).replaceAll("-", "");
+      const safeSurname = (state.job.header.employeeSurname || "employee").trim() || "employee";
+      const filename = `zamery_${safeDate}_${safeSurname}.pdf`;
 
-    downloadPdfBlob(blob, filename);
-  } catch (e) {
-    console.error(e);
-    alert("Не удалось сформировать PDF. Проверь консоль (ошибка шрифтов/файлов).");
-  }
-});
-
+      downloadPdfBlob(blob, filename);
+    } catch (e) {
+      console.error(e);
+      alert("Не удалось сформировать PDF. Проверь консоль (ошибка шрифтов/файлов).");
+    }
+  });
 }
 
 function bindDelegatedEvents() {

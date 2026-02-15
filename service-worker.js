@@ -1,4 +1,4 @@
-const CACHE_NAME = "measurements-pwa-v7";
+const CACHE_NAME = "measurements-pwa-v8";
 
 const ASSETS = [
   "./",
@@ -7,11 +7,11 @@ const ASSETS = [
   "./pdf-lib.min.js",
   "./app.js",
   "./manifest.json",
-  "./service-worker.js"
+  "./service-worker.js",
   "./fontkit.umd.min.js",
   "./Roboto-Regular.ttf",
-  "./Manasco.otf",
-
+  "./EducationalGothic-Regular.otf",
+  "./logo.png",
 ];
 
 // Установка — кешируем файлы
@@ -41,7 +41,7 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Перехват запросов
+// Перехват запросов (cache-first)
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
