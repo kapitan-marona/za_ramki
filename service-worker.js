@@ -1,4 +1,4 @@
-const CACHE_NAME = "measurements-pwa-v3";
+const CACHE_NAME = "measurements-pwa-v7";
 
 const ASSETS = [
   "./",
@@ -8,6 +8,10 @@ const ASSETS = [
   "./app.js",
   "./manifest.json",
   "./service-worker.js"
+  "./fontkit.umd.min.js",
+  "./Roboto-Regular.ttf",
+  "./Manasco.otf",
+
 ];
 
 // Установка — кешируем файлы
