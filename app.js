@@ -52,7 +52,6 @@ function loadJob() {
       ...job.doors.entrance,
       ...((parsed.doors && parsed.doors.entrance) || {}),
     };
-
     job.doors.interior = Array.isArray(parsed?.doors?.interior) ? parsed.doors.interior : [];
     job.doors.notes = parsed?.doors?.notes ?? "";
 
@@ -117,12 +116,23 @@ function setByPath(obj, path, value) {
   cur[parts[parts.length - 1]] = value;
 }
 
-// NEW: name field (backward compatible)
+// name fields (backward compatible)
 function buildInteriorDoor() {
   return { name: "", depth: "", height: "", width: "" };
 }
 function buildWindow() {
-  return { name: "", depth: "", height: "", width: "", sill: "" };
+  return {
+    name: "",
+    depth: "",
+    height: "",
+    width: "",
+    // legacy single-field sill (kept for backward compatibility)
+    sill: "",
+    // new sill measurements (designer-friendly)
+    sillDepth: "",
+    sillHeight: "",
+    sillWidth: "",
+  };
 }
 function buildRadiator() {
   return { name: "", fromWall: "", fromFloor: "", centerDistance: "" };
@@ -218,10 +228,17 @@ function renderWindows() {
       </div>
       <div class="grid grid--3">
         <label class="field">
-          <span class="field__label">Подоконник (мм)</span>
-          <input class="num" inputmode="numeric" pattern="[0-9]*" data-path="windows.items.${idx}.sill" placeholder="мм" value="${w.sill ?? ""}" />
+          <span class="field__label">Подоконник — Глубина (мм)</span>
+          <input class="num" inputmode="numeric" pattern="[0-9]*" data-path="windows.items.${idx}.sillDepth" placeholder="мм" value="${w.sillDepth ?? w.sill ?? ""}" />
         </label>
-        <div></div><div></div>
+        <label class="field">
+          <span class="field__label">Подоконник — Высота от пола (мм)</span>
+          <input class="num" inputmode="numeric" pattern="[0-9]*" data-path="windows.items.${idx}.sillHeight" placeholder="мм" value="${w.sillHeight ?? ""}" />
+        </label>
+        <label class="field">
+          <span class="field__label">Подоконник — Ширина/длина (мм)</span>
+          <input class="num" inputmode="numeric" pattern="[0-9]*" data-path="windows.items.${idx}.sillWidth" placeholder="мм" value="${w.sillWidth ?? ""}" />
+        </label>
       </div>
     `;
     root.appendChild(wrap);
@@ -293,7 +310,6 @@ function downloadPdfBlob(blob, filename) {
   a.click();
   a.remove();
 
-  // mobile fallback: open in new tab
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   if (isMobile) {
     setTimeout(() => {
@@ -315,99 +331,60 @@ async function generatePDF(job) {
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit(window.fontkit);
 
-  // Load fonts (must be in the same folder as index.html)
   const robotoBytes = await fetch("./Roboto-Regular.ttf").then((r) => {
     if (!r.ok) throw new Error("Roboto-Regular.ttf not found");
     return r.arrayBuffer();
   });
 
-  const titleBytes = await fetch("./EducationalGothic-Regular.otf").then((r) => {
-    if (!r.ok) throw new Error("EducationalGothic-Regular.otf not found");
+  const robotoMediumBytes = await fetch("./Roboto-Medium.ttf").then((r) => {
+    if (!r.ok) throw new Error("Roboto-Medium.ttf not found");
     return r.arrayBuffer();
   });
 
-  const logoBytes = await fetch("./logo.png").then((r) => {
-    if (!r.ok) throw new Error("logo.png not found");
+  const titleBytes = await fetch("./Manasco.otf").then((r) => {
+    if (!r.ok) throw new Error("Manasco.otf not found");
     return r.arrayBuffer();
   });
 
-  const fontText = await pdfDoc.embedFont(robotoBytes, { subset: true });
-  const fontTitle = await pdfDoc.embedFont(titleBytes, { subset: true });
-  const logoImg = await pdfDoc.embedPng(logoBytes);
+  const fontText = await pdfDoc.embedFont(robotoBytes, { subset: true }); // body
+  const fontH = await pdfDoc.embedFont(robotoMediumBytes, { subset: true }); // headers
+  const fontTitle = await pdfDoc.embedFont(titleBytes, { subset: true }); // ZAMERY
 
-  // A4 portrait constants
   const W = 595.28;
   const H = 841.89;
 
-  // Brand colors
   const BG = window.PDFLib.rgb(31 / 255, 30 / 255, 26 / 255); // #1F1E1A
+
   const colorText = window.PDFLib.rgb(0.95, 0.95, 0.93);
   const colorMuted = window.PDFLib.rgb(0.78, 0.78, 0.74);
-  const colorRule = window.PDFLib.rgb(0.30, 0.30, 0.28);
   const colorCard = window.PDFLib.rgb(0.12, 0.12, 0.11);
+  const colorCardBorder = window.PDFLib.rgb(0.30, 0.30, 0.28);
+  const colorCapsule = window.PDFLib.rgb(0.16, 0.16, 0.15); // твоё
 
   const marginX = 48;
   const marginBottom = 54;
   const gap = 6;
 
-  const SIZE_TITLE = 24;
-  const SIZE_H2 = 13.5;
   const SIZE_TEXT = 11;
   const SIZE_SMALL = 9;
+
+  // columns
+  const colGap = 14;
+  const colW = (W - marginX * 2 - colGap) / 2;
+  const colX1 = marginX;
+  const colX2 = marginX + colW + colGap;
 
   let page = null;
   let y = 0;
 
   function newPage() {
     page = pdfDoc.addPage([W, H]);
-
-    // background
-    page.drawRectangle({
-      x: 0,
-      y: 0,
-      width: W,
-      height: H,
-      color: BG,
-    });
-
+    page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: BG });
     y = H - 70;
   }
 
-  function draw(text, opts = {}) {
-    const {
-      size = SIZE_TEXT,
-      font = fontText,
-      x = marginX,
-      color = colorText,
-      line = true,
-    } = opts;
-
-    page.drawText(String(text), { x, y, size, font, color });
-    if (line) y -= (size + gap);
-  }
-
-  function rule() {
-    const yLine = y + 4;
-    page.drawLine({
-      start: { x: marginX, y: yLine },
-      end: { x: W - marginX, y: yLine },
-      thickness: 1,
-      color: colorRule,
-    });
-    y -= 14;
-  }
-
   function ensureSpace(minHeight) {
-    if (y - minHeight < marginBottom) {
-      newPage();
-    }
-  }
-
-  function section(title) {
-    ensureSpace(42);
-    y -= 8;
-    draw(title, { font: fontTitle, size: SIZE_H2 });
-    rule();
+    if (y - minHeight < marginBottom) newPage();
   }
 
   function isNonEmptyLocal(v) {
@@ -420,6 +397,22 @@ async function generatePDF(job) {
 
   function cardNonEmptyLocal(obj) {
     return Object.values(obj).some((v) => isNonEmptyLocal(v));
+  }
+
+  function formatDateDDMMYYYY(s) {
+    const raw = String(s || "").trim();
+    const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return `${m[3]}.${m[2]}.${m[1]}`;
+    return raw;
+  }
+
+  function drawSpaced(text, x, size, spacing = 1.2) {
+    let xx = x;
+    for (const ch of text) {
+      page.drawText(ch, { x: xx, y, size, font: fontTitle, color: colorText });
+      xx += fontTitle.widthOfTextAtSize(ch, size) + spacing;
+    }
+    y -= size + gap;
   }
 
   function card(title, rows) {
@@ -436,27 +429,24 @@ async function generatePDF(job) {
     const w = W - marginX * 2;
     const yTop = y;
 
-    // card rect
     page.drawRectangle({
       x,
       y: yTop - h,
       width: w,
       height: h,
       color: colorCard,
-      borderColor: colorRule,
+      borderColor: colorCardBorder,
       borderWidth: 1,
     });
 
-    // title
     page.drawText(String(title), {
       x: x + padding,
       y: yTop - padding - 14,
       size: 12.5,
-      font: fontTitle,
+      font: fontH,
       color: colorText,
     });
 
-    // rows
     let yy = yTop - padding - headerH;
     safeRows.forEach((row) => {
       page.drawText(String(row), {
@@ -470,6 +460,234 @@ async function generatePDF(job) {
     });
 
     y = yTop - h - 12;
+  }
+
+  // ---- capsule (rounded rect) via SVG path ----
+  function roundedRectPath(x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    const x0 = x, y0 = y;
+    const x1 = x + w, y1 = y + h;
+
+    return [
+      `M ${x0 + rr} ${y0}`,
+      `L ${x1 - rr} ${y0}`,
+      `C ${x1 - rr / 2} ${y0} ${x1} ${y0 + rr / 2} ${x1} ${y0 + rr}`,
+      `L ${x1} ${y1 - rr}`,
+      `C ${x1} ${y1 - rr / 2} ${x1 - rr / 2} ${y1} ${x1 - rr} ${y1}`,
+      `L ${x0 + rr} ${y1}`,
+      `C ${x0 + rr / 2} ${y1} ${x0} ${y1 - rr / 2} ${x0} ${y1 - rr}`,
+      `L ${x0} ${y0 + rr}`,
+      `C ${x0} ${y0 + rr / 2} ${x0 + rr / 2} ${y0} ${x0 + rr} ${y0}`,
+      "Z",
+    ].join(" ");
+  }
+
+  // rows: [{label,c1,c2,c3,(c4)}], cols: {h1,h2,h3,(h4)}
+  function sectionBlockAt(x, w, yTop, titleCaps, rows, noteTitle, noteText, cols) {
+    const paddingX = 10;
+    const padTop = 8;
+
+    const rowH = 14;
+    const gapAfterTitle = 8;
+    const gapAfterRows = 6;
+
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const rowsCount = safeRows.length;
+    const hasNote = isNonEmptyLocal(noteText);
+    const noteLinesCount = hasNote
+      ? String(noteText).split("\n").map((s) => s.trim()).filter(Boolean).length
+      : 0;
+
+    // number of value columns (default 3)
+    const headers = [
+      String(cols?.h1 || ""),
+      String(cols?.h2 || ""),
+      String(cols?.h3 || ""),
+      String(cols?.h4 || ""),
+    ].filter((s) => s && s.trim().length > 0);
+    const colCount = Math.max(3, Math.min(4, headers.length || 3));
+
+    // высота блока (без большой карточки)
+    const h =
+      padTop +
+      22 + // area for capsule+line
+      gapAfterTitle +
+      (rowsCount ? rowH * (rowsCount + 1) : rowH * 2) + // +1 = header row
+      gapAfterRows +
+      (hasNote ? (18 + rowH * (1 + Math.max(1, noteLinesCount))) : 0) +
+      6;
+
+    // capsule
+    const titleSize = 12;
+    const capPadX = 10;
+    const capPadY = 4;
+
+    const titleW = fontH.widthOfTextAtSize(String(titleCaps), titleSize);
+    const capsuleW = Math.min(w * 0.62, titleW + capPadX * 2);
+    const capsuleH = titleSize + capPadY * 2;
+
+    const capX = x + paddingX;
+    const capY = yTop - padTop - capsuleH;
+
+    page.drawSvgPath(roundedRectPath(capX, capY, capsuleW, capsuleH, 7), {
+      color: colorCapsule,
+    });
+
+    page.drawText(String(titleCaps), {
+      x: capX + capPadX,
+      y: capY + capPadY + 1,
+      size: titleSize,
+      font: fontH,
+      color: colorText,
+    });
+
+    // thin line to the right of capsule
+    const lineY = capY + capsuleH / 2;
+    page.drawLine({
+      start: { x: capX + capsuleW + 10, y: lineY },
+      end: { x: x + w - paddingX, y: lineY },
+      thickness: 1,
+      color: colorCardBorder,
+    });
+
+    // table layout
+    let yy = capY - gapAfterTitle;
+
+    // slightly smaller label area when we have 4 value cols
+    const labelW = Math.floor(w * (colCount === 4 ? 0.44 : 0.52));
+    const cW = Math.floor((w - paddingX * 2 - labelW) / colCount);
+
+    const xLabel = x + paddingX;
+
+    // x positions for each value column
+    const xCols = [];
+    for (let i = 0; i < colCount; i++) {
+      xCols.push(xLabel + labelW + cW * i);
+    }
+
+    // header (right-aligned)
+    const headerSize = 10;
+    const headerFont = fontH;
+
+    const defaultHeaders = colCount === 4 ? ["Г", "В", "Ш", "П"] : ["Г", "В", "Ш"];
+    const headersFinal = [];
+    for (let i = 0; i < colCount; i++) {
+      headersFinal.push(String(headers[i] || defaultHeaders[i] || ""));
+    }
+
+    headersFinal.forEach((hTxt, i) => {
+      page.drawText(hTxt, {
+        x: xCols[i] + cW - 8 - headerFont.widthOfTextAtSize(hTxt, headerSize),
+        y: yy - 11,
+        size: headerSize,
+        font: headerFont,
+        color: colorText,
+      });
+    });
+
+    // rule under header
+    page.drawLine({
+      start: { x: x + paddingX, y: yy - 14 },
+      end: { x: x + w - paddingX, y: yy - 14 },
+      thickness: 1,
+      color: colorCardBorder,
+    });
+
+    yy -= rowH;
+
+    if (!rowsCount) {
+      page.drawText("—", {
+        x: xLabel,
+        y: yy - 11,
+        size: SIZE_TEXT,
+        font: fontText,
+        color: colorMuted,
+      });
+      yy -= rowH;
+    } else {
+      safeRows.forEach((r, idx) => {
+        const label = String(r?.label || "").trim() || "—";
+        const values = [
+          String(r?.c1 || "").trim(),
+          String(r?.c2 || "").trim(),
+          String(r?.c3 || "").trim(),
+          String(r?.c4 || "").trim(),
+        ].slice(0, colCount);
+
+        page.drawText(label, {
+          x: xLabel,
+          y: yy - 11,
+          size: SIZE_TEXT,
+          font: fontText,
+          color: colorMuted,
+        });
+
+        // values right-aligned within their cells
+        values.forEach((v, i) => {
+          if (!v) return;
+          page.drawText(v, {
+            x: xCols[i] + cW - 8 - fontText.widthOfTextAtSize(v, SIZE_TEXT),
+            y: yy - 11,
+            size: SIZE_TEXT,
+            font: fontText,
+            color: colorText,
+          });
+        });
+
+        // micro divider between rows
+        if (idx !== safeRows.length - 1) {
+          page.drawLine({
+            start: { x: x + paddingX, y: yy - 14 },
+            end: { x: x + w - paddingX, y: yy - 14 },
+            thickness: 1,
+            color: window.PDFLib.rgb(0.22, 0.22, 0.20),
+          });
+        }
+
+        yy -= rowH;
+      });
+    }
+
+    // comment
+    if (hasNote) {
+      yy -= 2;
+      page.drawLine({
+        start: { x: x + paddingX, y: yy },
+        end: { x: x + w - paddingX, y: yy },
+        thickness: 1,
+        color: colorCardBorder,
+      });
+      yy -= 10;
+
+      page.drawText(String(noteTitle || "Комментарий:"), {
+        x: x + paddingX,
+        y: yy - 11,
+        size: SIZE_TEXT,
+        font: fontH,
+        color: colorText,
+      });
+      yy -= rowH;
+
+      const noteLines = String(noteText)
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      if (noteLines.length === 0) noteLines.push("—");
+
+      noteLines.forEach((ln) => {
+        page.drawText(ln, {
+          x: x + paddingX,
+          y: yy - 11,
+          size: SIZE_TEXT,
+          font: fontText,
+          color: colorMuted,
+        });
+        yy -= rowH;
+      });
+    }
+
+    return h + 10;
   }
 
   // ---------- Collect printable data ----------
@@ -496,6 +714,11 @@ async function generatePDF(job) {
       depth: N(w?.depth),
       height: N(w?.height),
       width: N(w?.width),
+      // new sill fields; fallback to legacy `sill` as depth if present
+      sillDepth: N(w?.sillDepth) || N(w?.sill),
+      sillHeight: N(w?.sillHeight),
+      sillWidth: N(w?.sillWidth),
+      // keep legacy value for completeness (not used in PDF/UI)
       sill: N(w?.sill),
     }))
     .filter(cardNonEmptyLocal);
@@ -520,95 +743,145 @@ async function generatePDF(job) {
   // ---------- Draw PDF ----------
   newPage();
 
-  // Logo in header
-  const logoW = 44;
-  const logoH = (logoImg.height / logoImg.width) * logoW;
+  // Title only
+  const titleText = "ЗАМЕРЫ";
+  const TITLE_SIZE = 32;
+  const letterSpacing = 1.2;
 
-  page.drawImage(logoImg, {
-    x: marginX,
-    y: H - 54 - logoH / 2,
-    width: logoW,
-    height: logoH,
-  });
+  let titleWidth = 0;
+  for (const ch of titleText) titleWidth += fontTitle.widthOfTextAtSize(ch, TITLE_SIZE) + letterSpacing;
+  titleWidth -= letterSpacing;
 
-  draw("Замеры", { font: fontTitle, size: SIZE_TITLE, x: marginX + 56 });
-  draw("Отчёт по объекту", { font: fontText, size: SIZE_TEXT, color: colorMuted, x: marginX + 56 });
-  y -= 10;
+  y = H - 92;
+  const titleX = (W - titleWidth) / 2;
+  drawSpaced(titleText, titleX, TITLE_SIZE, letterSpacing);
 
-  // Header block (no "Шапка")
-  rule();
+  y -= 6;
 
+  // Data card (full width)
   const headerRows = [];
-  if (isNonEmptyLocal(header.date)) headerRows.push(`Дата: ${header.date}`);
+  if (isNonEmptyLocal(header.date)) headerRows.push(`Дата: ${formatDateDDMMYYYY(header.date)}`);
   if (isNonEmptyLocal(header.address)) headerRows.push(`Адрес: ${header.address}`);
   if (isNonEmptyLocal(header.employeeSurname)) headerRows.push(`Сотрудник: ${header.employeeSurname}`);
   if (headerRows.length === 0) headerRows.push("—");
 
   card("Данные объекта", headerRows);
 
-  if (doorsHas) {
-    section("Двери");
+  // Columns start
+  let yCol1 = y;
+  let yCol2 = y;
 
-    if (cardNonEmptyLocal(entranceP)) {
-      const rows = [];
-      if (isNonEmptyLocal(entranceP.depth)) rows.push(`Глубина: ${entranceP.depth} мм`);
-      if (isNonEmptyLocal(entranceP.height)) rows.push(`Высота: ${entranceP.height} мм`);
-      if (isNonEmptyLocal(entranceP.width)) rows.push(`Ширина: ${entranceP.width} мм`);
-      card("Входная дверь", rows);
+  function estimateBlockHeight(rows, noteText) {
+    const n = Array.isArray(rows) ? rows.length : 0;
+    const hasNote = isNonEmptyLocal(noteText);
+
+    const noteLines = hasNote
+      ? String(noteText).split("\n").map((s) => s.trim()).filter(Boolean).length
+      : 0;
+
+    // rough but safe; accounts for multi-line notes
+    return 90 + (n + 1) * 14 + (hasNote ? (30 + 14 * (1 + Math.max(1, noteLines))) : 0);
+  }
+
+  function placeInColumns(titleCaps, rows, noteText, cols) {
+    const useFirst = yCol1 >= yCol2;
+    const x = useFirst ? colX1 : colX2;
+    const w = colW;
+    const yTop = useFirst ? yCol1 : yCol2;
+
+    const roughH = estimateBlockHeight(rows, noteText);
+
+    if (yTop - roughH < marginBottom) {
+      newPage();
+      yCol1 = y;
+      yCol2 = y;
+      return placeInColumns(titleCaps, rows, noteText, cols);
     }
 
-    if (interiorP.length > 0) {
-      interiorP.forEach((d, i) => {
-        const rows = [];
-        if (isNonEmptyLocal(d.depth)) rows.push(`Глубина: ${d.depth} мм`);
-        if (isNonEmptyLocal(d.height)) rows.push(`Высота: ${d.height} мм`);
-        if (isNonEmptyLocal(d.width)) rows.push(`Ширина: ${d.width} мм`);
-        const title = d.name || `Межкомнатная дверь ${i + 1}`;
-        card(title, rows);
+    const used = sectionBlockAt(x, w, yTop, titleCaps, rows, "Комментарий:", noteText, cols);
+    if (useFirst) yCol1 -= used;
+    else yCol2 -= used;
+  }
+
+  // ---- DOORS (Г/В/Ш) ----
+  if (doorsHas) {
+    const rows = [];
+
+    if (cardNonEmptyLocal(entranceP)) {
+      rows.push({
+        label: "Входная дверь",
+        c1: entranceP.depth ? String(entranceP.depth) : "",
+        c2: entranceP.height ? String(entranceP.height) : "",
+        c3: entranceP.width ? String(entranceP.width) : "",
       });
     }
 
-    if (isNonEmptyLocal(notesDoors)) {
-      card("Заметки по дверям", [notesDoors]);
-    }
+    interiorP.forEach((d, i) => {
+      const t = d.name || `М/к дверь ${i + 1}`;
+      rows.push({
+        label: t,
+        c1: d.depth ? String(d.depth) : "",
+        c2: d.height ? String(d.height) : "",
+        c3: d.width ? String(d.width) : "",
+      });
+    });
+
+    placeInColumns("ДВЕРИ", rows, notesDoors, { h1: "Г", h2: "В", h3: "Ш" });
   }
 
+  // ---- WINDOWS (Г/В/Ш + подоконник отдельной строкой под окном) ----
   if (windowsHas) {
-    section("Окна");
+    const rows = [];
 
     windowsP.forEach((w, i) => {
-      const rows = [];
-      if (isNonEmptyLocal(w.depth)) rows.push(`Глубина: ${w.depth} мм`);
-      if (isNonEmptyLocal(w.height)) rows.push(`Высота: ${w.height} мм`);
-      if (isNonEmptyLocal(w.width)) rows.push(`Ширина: ${w.width} мм`);
-      if (isNonEmptyLocal(w.sill)) rows.push(`Подоконник: ${w.sill} мм`);
-      const title = w.name || `Окно ${i + 1}`;
-      card(title, rows);
+      const t = w.name || `Окно ${i + 1}`;
+
+      // window row
+      rows.push({
+        label: t,
+        c1: w.depth ? String(w.depth) : "",
+        c2: w.height ? String(w.height) : "",
+        c3: w.width ? String(w.width) : "",
+      });
+
+      // sill row (only if at least one value is present)
+      const hasSill =
+        isNonEmptyLocal(w.sillDepth) ||
+        isNonEmptyLocal(w.sillHeight) ||
+        isNonEmptyLocal(w.sillWidth);
+
+      if (hasSill) {
+        rows.push({
+          label: "— Подоконник",
+          c1: w.sillDepth ? String(w.sillDepth) : "",
+          c2: w.sillHeight ? String(w.sillHeight) : "",
+          c3: w.sillWidth ? String(w.sillWidth) : "",
+        });
+      }
     });
 
-    if (isNonEmptyLocal(notesWindows)) {
-      card("Заметки по окнам", [notesWindows]);
-    }
+    // keep section comment separate from sill rows
+    placeInColumns("ОКНА", rows, notesWindows, { h1: "Г", h2: "В", h3: "Ш" });
   }
 
+  // ---- RADIATORS (С/П/М) ----
   if (radiatorsHas) {
-    section("Радиаторы");
+    const rows = [];
 
     radiatorsP.forEach((r, i) => {
-      const rows = [];
-      if (isNonEmptyLocal(r.fromWall)) rows.push(`От стены: ${r.fromWall} мм`);
-      if (isNonEmptyLocal(r.fromFloor)) rows.push(`От пола: ${r.fromFloor} мм`);
-      if (isNonEmptyLocal(r.centerDistance)) rows.push(`Межосевое: ${r.centerDistance} мм`);
-      const title = r.name || `Радиатор ${i + 1}`;
-      card(title, rows);
+      const t = r.name || `Радиатор ${i + 1}`;
+      rows.push({
+        label: t,
+        c1: r.fromWall ? String(r.fromWall) : "",
+        c2: r.fromFloor ? String(r.fromFloor) : "",
+        c3: r.centerDistance ? String(r.centerDistance) : "",
+      });
     });
 
-    if (isNonEmptyLocal(notesRadiators)) {
-      card("Заметки по радиаторам", [notesRadiators]);
-    }
+    placeInColumns("РАДИАТОРЫ", rows, notesRadiators, { h1: "С", h2: "П", h3: "М" });
   }
 
-  // footer (always on last page of current flow; if you want on every page позже сделаем)
+  // footer
   page.drawText("Сгенерировано офлайн. В отчёт попадают только заполненные поля.", {
     x: marginX,
     y: 26,

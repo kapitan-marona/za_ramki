@@ -1,4 +1,4 @@
-const CACHE_NAME = "measurements-pwa-v8";
+const CACHE_NAME = "measurements-pwa-v18";
 
 const ASSETS = [
   "./",
@@ -10,7 +10,8 @@ const ASSETS = [
   "./service-worker.js",
   "./fontkit.umd.min.js",
   "./Roboto-Regular.ttf",
-  "./EducationalGothic-Regular.otf",
+  "./Roboto-Medium.ttf",
+  "./Manasco.otf",
   "./logo.png",
 ];
 
@@ -18,7 +19,8 @@ const ASSETS = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
+      // Берём свежие версии файлов при установке новой версии SW
+      return cache.addAll(ASSETS.map((url) => new Request(url, { cache: "reload" })));
     })
   );
   self.skipWaiting();
